@@ -137,6 +137,7 @@ message:
 '''
 
 from ansible.module_utils.basic import AnsibleModule
+import json
 import os
 import subprocess
 
@@ -169,20 +170,6 @@ def generate_public(private_key):
     public_key = public_key_gen.stdout
 
     return str(public_key).strip()
-
-def make_client_config(address, dns, private_key, endpoint, public_key):
-    config = {}
-    config['Interface'] = {}
-    config['Peer'] = {}
-
-    config['Interface']['Address'] = address
-    config['Interface']['DNS'] = dns
-    config['Interface']['PrivateKey'] = private_key
-
-
-    config['Peer']['AllowedIPs'] = '0.0.0.0/0'
-    config['Peer']['PublicKey'] = public_key
-    config['Peer']['Endpoint'] = endpoint
 
 def write_interface(config, configFile, section):
     configFile.write('[' + section + ']' + '\n')
@@ -221,7 +208,7 @@ def make_interface(params):
             # TODO: Is this needed
             #config['Interface']['Address'] = config['Interface']['address'][:-1]
     else:
-        config['Interface']['Address'] = DEFAULTADDRESS.format(1, 24)
+        config['Interface']['Address'].append(DEFAULTADDRESS.format(1, 24))
         #module.fail_json(msg='No address specified')
 
     if 'private_key' in params and params['private_key'] != None:
@@ -333,10 +320,12 @@ class Config():
         self.interface = Interface()
         self.peers = []
 
-    def ToWgQuick():
+    def ToWgQuick(self):
         output = ""
 
         output += "[Interface]\n"
+
+        output += "PrivateKey = {:s}\n".format(self.interface.private_key)
 
         if self.interface.listen_port != None:
             output += "ListenPort = {:d}\n".format(self.interface.listen_port)
@@ -344,11 +333,12 @@ class Config():
         if len(self.interface.addresses) > 0:
             output += "Address = {:s}\n".format(", ".join(self.interface.addresses))
 
-        if len(self.interface.addresses) > 0:
+        if len(self.interface.dns) > 0:
             output += "DNS = {:s}\n".format(", ".join(self.interface.dns))
 
         if self.interface.mtu != None:
-            output += "MTU = {:d}\n".format(self.interface.mtu)
+            pass
+            #output += "MTU = {:d}\n".format(self.interface.mtu)
 
         for peer in self.peers:
             output += "\n[Peer]\n"
@@ -356,16 +346,20 @@ class Config():
             output += "PublicKey = {:s}\n".format(peer.public_key)
 
             if peer.preshared_key != None:
-                output += "PresharedKey = {:s}\n".format(peer.preshared_key)
+                pass
+                #output += "PresharedKey = {:s}\n".format(peer.preshared_key)
 
             if len(peer.allowedIPs) > 0:
                 output += "AllowedIPs = {:s}\n".format(", ".join(peer.allowedIPs))
 
             if peer.endpoint != None:
-                output += "Endpoint = {:s}\n".format(peer.endpoint)
+                if peer.endpoint != "":
+                    output += "Endpoint = {:s}\n".format(peer.endpoint)
 
             if peer.persistent_keepalive != None:
-                output += "PersistentKeepalive = {:d}\n".format(peer.persistent_keepalive)
+                pass
+                #output += "PersistentKeepalive = {:d}\n".format(peer.persistent_keepalive)
+
             return output
 
 class Interface():
@@ -373,9 +367,74 @@ class Interface():
     def __init__(self):
         self.private_key = ""
         self.addresses = []
-        self.listen_port = 0
-        self.mtu = 0
+        self.listen_port = None
+        self.mtu = None
         self.dns = []
+
+    def make_interface(self, params):
+        # TODO keylen is based on bytes
+        #keyLen = 32
+        keyLen = 0
+        config = {}
+        config['Interface'] = {}
+        
+        # change to fail params?
+        if 'address' in params and params['address'] != None:
+            if len(params['address'] ) == 1:
+                self.addresses = params['address'][0]
+            elif len(params['address']) > 1:
+                self.addresses = params['address']
+                
+        else:
+            self.addresses.append(DEFAULTADDRESS.format(1, 24))
+            #module.fail_json(msg='No address specified')
+
+        if 'private_key' in params and params['private_key'] != None:
+            # TODO keylen is based on bytes
+            if len(params['private_key']) < keyLen:
+                module.fail_json(msg='private_key is not correct length ' +
+                        str(len(params['private_key'])))
+            else:
+                self.private_key = params['private_key']
+        else:
+            private_key, public_key = generate_keys()
+            self.private_key = private_key
+            #config['Interface']['PublicKey'] = public_key
+            #module.fail_json(msg='No private_key specified')
+
+        if 'saveconfig' in params and params['saveconfig'] != None:
+            if params['saveconfig'] == False:
+                config['Interface']['SaveConfig'] = 'false'
+            else:
+                config['Interface']['SaveConfig'] = 'true'
+
+        if 'dns' in params and params['dns'] != None:
+            self.dns = params['dns']
+
+        if 'listen_port' in params and params['listen_port'] != None:
+            self.listen_port = params['listen_port']
+        else:
+            print()
+            # dont fail this is not required
+            #module.fail_json(msg='No listen_port specified')
+
+        if 'mtu' in params and params['mtu'] != None:
+            self.mtu = params['mtu']
+
+        if 'table' in params and params['table'] != None:
+            config['Interface']['Table'] = params['table']
+
+        if 'preup' in params and params['preup'] != None:
+            config['Interface']['PreUp'] = params['preup']
+
+        if 'predown' in params and params['predown'] != None:
+            config['Interface']['PreDown'] = params['predown']
+
+        if 'postup' in params and params['postup'] != None:
+            config['Interface']['PostUp'] = params['preup']
+
+        if 'postdown' in params and params['postdown'] != None:
+            config['Interface']['PostDown'] = params['postdown']
 
 class Peer():
 
@@ -386,6 +445,51 @@ class Peer():
         self.endpoint = ""
         self.persistent_keepalive = 0
 
+    def make_peer(self, params):
+        # todo keylen is based on bytes
+        #keylen = 32
+        keyLen = 0
+
+        config = {}
+        config['Peer'] = {}
+        config['Interface'] = {}
+
+        # TODO: verify its an IP address?
+        #if params['allowedIPs'] != None:
+        if 'allowedIPs' in params and params['allowedIPs'] != None:
+            if len(params['allowedIPs'] ) == 1:
+                self.allowedIPs = params['allowedIPs'][0]
+            elif len(params['allowedIPs']) > 1:
+                self.allowedIPs = ",".join(params['address'])
+        else:
+            # TODO: add ipv6 support
+            #self.allowedIPs.append(DEFAULTADDRESS.format(address, 32))
+            # dont fail add allowedIPs
+            module.fail_json(msg='No allowedIPs specified')
+
+        if 'public_key' in params and params['public_key'] != None:
+            if len(params['public_key']) < keyLen:
+                module.fail_json(msg='No public_key is not correct length')
+            else:
+                self.public_key = params['public_key']
+        else:
+            private_key, public_key = generate_keys()
+            config['Interface']['PrivateKey'] = private_key
+            config['Interface']['PublicKey'] = public_key
+            config['Peer']['PublicKey'] = public_key
+            #module.fail_json(msg='No public_key specified')
+
+        if 'preshared_key' in params and  params['preshared_key'] != None:
+            if len(params['preshared_key']) != keyLen:
+                module.fail_json(msg='No preshared_key is not correct length')
+            else:
+                self.preshared_key = params['preshared_key']
+
+        if 'endpoint' in params and params['endpoint'] != None:
+             self.endpoint = params['endpoint']
+
+        if 'persistent_keepalive' in params and params['persistent_keepalive'] != None:
+            self.persistent_keepalive = params['persistent_keepalive']
 
 def run_module():
     # define available arguments/parameters a user can pass to the module
@@ -397,12 +501,13 @@ def run_module():
             listen_port = dict(type='int', required=False),
             public_key = dict(type='str', required=False),
             table = dict(type='str', required=False),
-            dns = dict(type='int', required=False),
+            dns = dict(type='str', required=False),
             mtu = dict(type='int', required=False),
             preup = dict(type='str', required=False),
             predown = dict(type='str', required=False),
             postup = dict(type='str', required=False),
             postdown = dict(type='str', required=False),
+            endpoint = dict(type='str', required=False),
             # TODO: still need a replace peers
             # is this the same thing as replace peers
             saveconfig = dict(type='bool', required=False, default=False),
@@ -456,73 +561,93 @@ def run_module():
     nameclient = "/etc/wireguard/"
     name = nameclient + name
 
-    #print(module.params['peers'])
-    #module.fail_json(msg='name is not specified')
+    # we are just making server config with everything else provided
+    if not module.params['generatepeers']:
+        conf = Config()
+        conf.name = name
 
-    conf = Config()
-    conf.name = name
+        conf.interface.make_interface(module.params['server'])
 
-    if 'server' in module.params:
-        address_count = 2
+        #if 'peers' not in module.params['server']:
+        #    module.fail_json(msg='peers not specified')
 
-        #print(params)
-        #module.fail_json(msg='name is not specified')
-        interface = make_interface(module.params['server'])
-        #conf.make_interface(module.params['server'])
-
-        if 'peers' not in module.params['server']:
-            module.fail_json(msg='peers not specified')
-
-        # problem is how to make peer configs from stratch
-
-        peers = []
         for peer in module.params['server']['peers']:
-            #print(peer)
-            #module.fail_json(msg='name is not specified')
-
-            p = make_peer(peer, address_count)
-            p['Interface']['Address'] = DEFAULTADDRESS.format(address_count, 32)
-            peers.append(p)
-            #conf.peers.append(p)
-            address_count += 1
+            p = Peer()
+            conf.peers.append(p.make_peer())
 
         with open(name, "w+") as fh:
-            write_interface(interface, fh, 'Interface')
-            for peer in peers:
-                write_interface(peer, fh, 'Peer')
+            fh.write(conf.ToWgQuick())
+            fh.close()
 
         os.chmod(name, 0o600)
 
-        if module.params['generatepeers']:
-            address_count = 2
-            for peer in peers:
-                interface2 = {}
+    # we want to make a server config and all of the peer configs
+    if module.params['generatepeers']:
+        # check for things needed for the peers first
+        if 'private_key' in module.params['server'] and module.params['server']['private_key'] == None:
+            private_key, public_key = generate_keys()
+            module.params['server']['private_key'] = private_key
+            module.params['server']['public_key'] = public_key
 
-                interface2['Address'] = peer['Interface']['Address']
-                interface2['PrivateKey'] = peer['Interface']['PrivateKey']
+        if 'listen_port' in module.params['server'] and module.params['server']['listen_port'] == None:
+            module.params['server']['listen_port'] = 5222
 
-                params_interface = {
-                        'DNS' : '10.200.200.1'
-                        }
 
-                params_peer = {
-                        'PublicKey' : interface['Interface']['PublicKey'],
-                        'AllowedIPs' : '0.0.0.0/0',
-                        'Endpoint' : 'dns.shellcode.in:5222'
-                        }
+        if 'endpoint' in module.params['server'] and module.params['server']['endpoint'] == None:
+            module.fail_json(msg='endpoint is not specified')
 
-                for k,v in params_peer.items():
-                    peer[k] = v
+        peerConfigs = []
+        # the first address goes to the server
+        address_count = 2
+        for peer in module.params['server']['peers']:
+            conf = Config()
+            conf.name = nameclient + "name{}".format(address_count)
 
-                for k,v in params_interface.items():
-                    interface2[k] = v
+            private_key, public_key = generate_keys()
+            conf.interface.private_key = private_key
+            conf.interface.addresses.append(DEFAULTADDRESS.format(address_count, 24))
+            
+            if 'dns' in module.params['server'] and module.params['server']['dns'] != None:
+                conf.interface.dns.append(module.params['server']['dns'])
+            else:
+                conf.interface.dns.append("10.200.200.1")
 
-                address_count += 1
+            p = Peer()
+            p.public_key = module.params['server']['public_key']
+            p.allowedIPs.append("0.0.0.0/0")
+            p.endpoint = module.params['server']['endpoint']
+            conf.peers.append(p)
 
-                n = nameclient + "name{}".format(address_count)
-                with open(n, "w+") as fh:
-                    write_interface2(interface2, fh, 'Interface')
-                    write_interface2(peer, fh, 'Peer')
+            peerConfigs.append(conf)
+            
+            address_count += 1
+
+            with open(conf.name, "w+") as fh:
+                fh.write(conf.ToWgQuick())
+                fh.close()
+            
+            os.chmod(conf.name, 0o600)
+
+        # now make the server config now that we have all of the peers and theirkeys
+        conf = Config()
+        conf.name = name
+
+        conf.interface.addresses.append(DEFAULTADDRESS.format(1, 24))
+        conf.interface.listen_port = module.params['server']['listen_port']
+        conf.interface.private_key = module.params['server']['private_key']
+
+        for peer in peerConfigs:
+            p = Peer()
+            p.public_key = generate_public(peer.interface.private_key)
+            p.allowedIPs.append(DEFAULTADDRESS.format(0,24))
+            #p.allowedIPs = DEFAULTADDRESS.format(0,24)
+            conf.peers.append(p)
+
+        with open(conf.name, "w+") as fh:
+            fh.write(conf.ToWgQuick())
+            fh.close()
+
+        os.chmod(conf.name, 0o600)
 
     # use whatever logic you need to determine whether or not this module
     # made any modifications to your target
