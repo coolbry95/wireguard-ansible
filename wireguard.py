@@ -104,25 +104,6 @@ EXAMPLES = '''
       - peer: name2
         #public_key: this is the public key2
         #private_key: this is the private key2
-
-- name: Testing new wireguard module
-  wireguard_test:
-     server:
-         name: wg1.conf
-         listen_port: 5222
-         peers: "{{ peers }}"
-
-- name: Testing new wireguard module
-  wireguard_test:
-     server:
-         name: wg1.conf
-         address: 127.0.2.2
-         private_key: 2FH8kqdw106CeIN/uu3SnDJd7ahQwwQNy5i0xY6HAXc=
-         listen_port: 5222
-         peers:
-           - peer: name1 # client config name
-               public_key: this is the public key
-               allowedIPs: 127.0.1.1
 '''
 
 RETURN = '''
@@ -223,135 +204,20 @@ class Config():
 class Interface():
 
     def __init__(self):
-        self.private_key = ""
+        self.private_key = None
         self.addresses = []
         self.listen_port = None
         self.mtu = None
         self.dns = []
 
-    def make_interface(self, params):
-        # TODO keylen is based on bytes
-        #keyLen = 32
-        keyLen = 0
-        config = {}
-        config['Interface'] = {}
-
-        # change to fail params?
-        if 'address' in params and params['address'] != None:
-            if len(params['address'] ) == 1:
-                self.addresses.append(params['address'][0])
-            elif len(params['address']) > 1:
-                self.addresses = params['address']
-
-        else:
-            self.addresses.append(DEFAULTADDRESS.format(1, 24))
-            #module.fail_json(msg='No address specified')
-
-        if 'private_key' in params and params['private_key'] != None:
-            # TODO keylen is based on bytes
-            if len(params['private_key']) < keyLen:
-                module.fail_json(msg='private_key is not correct length ' +
-                        str(len(params['private_key'])))
-            else:
-                self.private_key = params['private_key']
-        else:
-            private_key, public_key = generate_keys()
-            self.private_key = private_key
-            #config['Interface']['PublicKey'] = public_key
-            #module.fail_json(msg='No private_key specified')
-
-        if 'saveconfig' in params and params['saveconfig'] != None:
-            if params['saveconfig'] == False:
-                config['Interface']['SaveConfig'] = 'false'
-            else:
-                config['Interface']['SaveConfig'] = 'true'
-
-        # dns is not needed for servers only clients
-        #if 'dns' in params and params['dns'] != None:
-        #    if len(params['dns']) > 0:
-        #        self.dns.append(params['dns'][0])
-        #    else:
-        #        self.dns = ", ".join(params['dns'])
-
-        if 'listen_port' in params and params['listen_port'] != None:
-            self.listen_port = params['listen_port']
-        else:
-            print()
-            # dont fail this is not required
-            #module.fail_json(msg='No listen_port specified')
-
-        if 'mtu' in params and params['mtu'] != None:
-            self.mtu = params['mtu']
-
-        if 'table' in params and params['table'] != None:
-            config['Interface']['Table'] = params['table']
-
-        if 'preup' in params and params['preup'] != None:
-            config['Interface']['PreUp'] = params['preup']
-
-        if 'predown' in params and params['predown'] != None:
-            config['Interface']['PreDown'] = params['predown']
-
-        if 'postup' in params and params['postup'] != None:
-            config['Interface']['PostUp'] = params['preup']
-
-        if 'postdown' in params and params['postdown'] != None:
-            config['Interface']['PostDown'] = params['postdown']
-
 class Peer():
 
     def __init__(self):
-        self.public_key = ""
-        self.preshared_key = ""
+        self.public_key = None
+        self.preshared_key = None
         self.allowedIPs = []
-        self.endpoint = ""
-        self.persistent_keepalive = 0
-
-    def make_peer(self, params, module):
-        # todo keylen is based on bytes
-        #keylen = 32
-        keyLen = 0
-        #params = module.params['server']['peers']
-        #params = peer
-
-        config = {}
-        config['Peer'] = {}
-        config['Interface'] = {}
-
-        # TODO: verify its an IP address?
-        #if params['allowedIPs'] != None:
-        if 'allowedIPs' in params and params['allowedIPs'] != None:
-            if len(params['allowedIPs'] ) == 1:
-                self.allowedIPs.append(params['allowedIPs'][0])
-            elif len(params['allowedIPs']) > 1:
-                self.allowedIPs = ",".join(params['address'])
-        else:
-            # TODO: add ipv6 support
-            #self.allowedIPs.append(DEFAULTADDRESS.format(address, 32))
-            # dont fail add allowedIPs
-            self.allowedIPs.append("0.0.0.0/0")
-            #module.fail_json(msg='No allowedIPs specified')
-
-        if 'public_key' in params and params['public_key'] != None:
-            if len(params['public_key']) < keyLen:
-                module.fail_json(msg='No public_key is not correct length')
-            else:
-                self.public_key = params['public_key']
-        else:
-            private_key, public_key = generate_keys()
-            #module.fail_json(msg='No public_key specified')
-
-        if 'preshared_key' in params and  params['preshared_key'] != None:
-            if len(params['preshared_key']) != keyLen:
-                module.fail_json(msg='No preshared_key is not correct length')
-            else:
-                self.preshared_key = params['preshared_key']
-
-        if 'endpoint' in params and params['endpoint'] != None:
-             self.endpoint = params['endpoint']
-
-        if 'persistent_keepalive' in params and params['persistent_keepalive'] != None:
-            self.persistent_keepalive = params['persistent_keepalive']
+        self.endpoint = None
+        self.persistent_keepalive = None
 
 def run_module():
     # define available arguments/parameters a user can pass to the module
@@ -359,36 +225,31 @@ def run_module():
         server=dict(type='dict', required=False, options=dict(
             name=dict(type='str', required=True),
             private_key = dict(type='str', required=False),
-            address = dict(type='list', required=False),
+            addresses = dict(type='list', required=False),
             listen_port = dict(type='int', required=False),
-            public_key = dict(type='str', required=False),
-            table = dict(type='str', required=False),
-            dns = dict(type='list', required=False),
+            endpoint = dict(type='str', required=False),
+            # not handled currently
             mtu = dict(type='int', required=False),
             preup = dict(type='str', required=False),
             predown = dict(type='str', required=False),
             postup = dict(type='str', required=False),
             postdown = dict(type='str', required=False),
-            endpoint = dict(type='str', required=False),
-            # TODO: still need a replace peers
-            # is this the same thing as replace peers
+            table = dict(type='str', required=False),
             saveconfig = dict(type='bool', required=False, default=False),
+
             peers = dict(type='list', required=False, options=dict(
                 addresses = dict(type='list', required=False),
-                public_key = dict(type='str', required=False),
                 private_key = dict(type='str', required=False),
-                preshared_key = dict(type='str', required=False),
                 dns = dict(type='list', required=False),
-                #TODO: pretty sure this is required test
                 allowedIPs = dict(type='list', required=False),
                 endpoint = dict(type='str', required=False),
+                # not handled currently
+                preshared_key = dict(type='str', required=False),
                 persistent_keepalive = dict(type='int', required=False),
                 )),
             )),
 
         generatepeers = dict(type='bool', required=False, default=False),
-        new=dict(type='bool', required=False, default=False),
-        test=dict(type='list', required=False),
     )
 
     # seed the result dict in the object
@@ -444,13 +305,13 @@ def run_module():
             conf = Config()
             conf.name = peer['peer']
 
-            if peer['private_key'] == None:
+            if 'private_key' not in peer or peer['private_key'] == None:
                 private_key, public_key = generate_keys()
                 conf.interface.private_key = private_key
             else:
                 conf.interface.private_key = peer['private_key']
 
-            if peer['addresses'] == None:
+            if 'addresses' not in peer or peer['addresses'] == None:
                 conf.interface.addresses.append(DEFAULTADDRESS.format(address_count, 24))
             else:
                 if len(peer['addresses']) > 1:
@@ -458,7 +319,7 @@ def run_module():
                 else:
                     conf.interface.addresses.append(peer['addresses'][0])
 
-            if peer['dns'] != None:
+            if 'dns' in peer and peer['dns'] != None:
                 if len(peer['dns']) > 1:
                     conf.interface.dns = peer['dns']
                 else:
@@ -468,12 +329,12 @@ def run_module():
             p = Peer()
             p.endpoint = module.params['server']['endpoint']
 
-            if server['public_key'] != None:
-                p.public_key = server['public_key']
-            elif server['private_key'] != None:
+            if 'public_key' not in server or server['public_key'] == None:
                 p.public_key = generate_public(server['private_key'])
+            else:
+                p.public_key = server['public_key']
 
-            if peer['allowedIPs'] != None:
+            if 'allowedIPs' in peer and peer['allowedIPs'] != None:
                 if len(peer['allowedIPs']) > 1:
                     p.allowedIPs = peer['allowedIPs']
                 else:
@@ -497,7 +358,7 @@ def run_module():
         #conf.name = config_dir + server['name']
         conf.name = server['name']
 
-        if 'addresses' not in server:
+        if 'addresses' not in server or server['addresses'] == None:
             conf.interface.addresses.append(DEFAULTADDRESS.format(1, 24))
         else:
             if len(server['addresses']) > 1:
@@ -522,7 +383,7 @@ def run_module():
 
     # use whatever logic you need to determine whether or not this module
     # made any modifications to your target
-    if module.params['new']:
+    if module.params['server']:
         result['changed'] = True
 
     result['changed'] = True
@@ -539,7 +400,6 @@ def run_module():
 
 def main():
     run_module()
-
 
 if __name__ == '__main__':
     main()
