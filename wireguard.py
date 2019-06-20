@@ -29,7 +29,7 @@ options:
         description:
             - This is a server configuration object
         required: false
-        
+
         server=dict(type='dict', required=False, options=dict(
             name:
                 description:
@@ -420,43 +420,18 @@ def run_module():
     if 'name' not in module.params['server']:
         module.fail_json(msg='name is not specified')
 
-
-    #name = "/etc/wireguard/" + module.params['server']['name']
-    name = module.params['server']['name']
-    nameclient = "/etc/wireguard/"
-    name = nameclient + name
+    config_dir = "/etc/wireguard/"
     server = module.params['server']
-
-    # we are just making server config with everything else provided
-    if not module.params['generatepeers']:
-        conf = Config()
-        conf.name = name
-
-        conf.interface.make_interface(module.params['server'])
-
-        #if 'peers' not in module.params['server']:
-        #    module.fail_json(msg='peers not specified')
-        for peer in module.params['server']['peers']:
-            p = Peer()
-            p.make_peer(peer, module)
-            conf.peers.append(p)
-
-
-        with open(name, "w+") as fh:
-            fh.write(conf.ToWgQuick())
-            fh.close()
-
-        os.chmod(name, 0o600)
 
     # we want to make a server config and all of the peer configs
     if module.params['generatepeers']:
         # check for things needed for the peers first
-        if 'private_key' in module.params['server'] and module.params['server']['private_key'] == None:
+        if 'private_key' in server and server['private_key'] == None:
             private_key, public_key = generate_keys()
-            module.params['server']['private_key'] = private_key
-            module.params['server']['public_key'] = public_key
+            server['private_key'] = private_key
+            server['public_key'] = public_key
 
-        if 'listen_port' in module.params['server'] and module.params['server']['listen_port'] == None:
+        if 'listen_port' in server and server['listen_port'] == None:
             module.params['server']['listen_port'] = 5222
 
         if 'endpoint' in module.params['server'] and module.params['server']['endpoint'] == None:
@@ -467,7 +442,7 @@ def run_module():
         address_count = 2
         for peer in module.params['server']['peers']:
             conf = Config()
-            conf.name = nameclient + peer['peer']
+            conf.name = peer['peer']
 
             if peer['private_key'] == None:
                 private_key, public_key = generate_keys()
@@ -511,15 +486,16 @@ def run_module():
 
             address_count += 1
 
-            with open(conf.name, "w+") as fh:
+            with open(config_dir + conf.name, "w+") as fh:
                 fh.write(conf.ToWgQuick())
                 fh.close()
 
-            os.chmod(conf.name, 0o600)
+            os.chmod(config_dir + conf.name, 0o600)
 
         # now make the server config now that we have all of the peers and theirkeys
         conf = Config()
-        conf.name = name
+        #conf.name = config_dir + server['name']
+        conf.name = server['name']
 
         if 'addresses' not in server:
             conf.interface.addresses.append(DEFAULTADDRESS.format(1, 24))
@@ -538,11 +514,11 @@ def run_module():
             p.allowedIPs.append(DEFAULTADDRESS.format(0,24))
             conf.peers.append(p)
 
-        with open(conf.name, "w+") as fh:
+        with open(config_dir + conf.name, "w+") as fh:
             fh.write(conf.ToWgQuick())
             fh.close()
 
-        os.chmod(conf.name, 0o600)
+        os.chmod(config_dir + conf.name, 0o600)
 
     # use whatever logic you need to determine whether or not this module
     # made any modifications to your target
