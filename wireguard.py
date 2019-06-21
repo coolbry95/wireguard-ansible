@@ -304,7 +304,7 @@ def run_module():
 
     config_dir = "/etc/wireguard/"
     server = module.params['server']
-    generatepeers =- module.params['generatepeers']
+    generatepeers = module.params['generatepeers']
 
     # we want to make a server config and all of the peer configs
     # check for things needed for the peers first
