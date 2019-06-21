@@ -125,6 +125,8 @@ import subprocess
 # TODO: change this add ipv6 support
 DEFAULTADDRESS = "10.200.200.{}/{}"
 
+
+# maybe use run_command from module
 def generate_keys():
     # TODO: check errors
     private_key_gen = subprocess.run(['wg', 'genkey'], stdout=subprocess.PIPE)
@@ -176,8 +178,25 @@ class Config():
             output += "DNS = {:s}\n".format(", ".join(self.interface.dns))
 
         if self.interface.mtu != None:
-            pass
-            #output += "MTU = {:d}\n".format(self.interface.mtu)
+            output += "MTU = {:d}\n".format(self.interface.mtu)
+
+        if self.interface.table != None:
+            output += "Table = {:d}\n".format(self.interface.table)
+
+        if self.interface.preup != None:
+            output += "PreUp = {:s}\n".format(self.interface.preup)
+
+        if self.interface.predown != None:
+            output += "PreDown = {:s}\n".format(self.interface.predown)
+
+        if self.interface.postup != None:
+            output += "PostUp = {:s}\n".format(self.interface.postup)
+
+        if self.interface.postdown != None:
+            output += "PostDown = {:s}\n".format(self.interface.postdown)
+
+        if self.interface.saveconfig != None:
+            output += "SaveConfig = {:s}\n".format(self.interface.saveconfig)
 
         for peer in self.peers:
             output += "\n[Peer]\n"
@@ -185,8 +204,7 @@ class Config():
             output += "PublicKey = {:s}\n".format(peer.public_key)
 
             if peer.preshared_key != None:
-                pass
-                #output += "PresharedKey = {:s}\n".format(peer.preshared_key)
+                output += "PresharedKey = {:s}\n".format(peer.preshared_key)
 
             if len(peer.allowedIPs) > 0:
                 output += "AllowedIPs = {:s}\n".format(", ".join(peer.allowedIPs))
@@ -196,8 +214,7 @@ class Config():
                     output += "Endpoint = {:s}\n".format(peer.endpoint)
 
             if peer.persistent_keepalive != None:
-                pass
-                #output += "PersistentKeepalive = {:d}\n".format(peer.persistent_keepalive)
+                output += "PersistentKeepalive = {:d}\n".format(peer.persistent_keepalive)
 
             return output
 
@@ -209,6 +226,12 @@ class Interface():
         self.listen_port = None
         self.mtu = None
         self.dns = []
+        self.table = None
+        self.saveconfig = None
+        self.preup = None
+        self.predown = None
+        self.postup = None
+        self.postdown = None
 
 class Peer():
 
@@ -222,20 +245,19 @@ class Peer():
 def run_module():
     # define available arguments/parameters a user can pass to the module
     module_args = dict(
-        server=dict(type='dict', required=False, options=dict(
+        server=dict(type='dict', required=True, options=dict(
             name=dict(type='str', required=True),
             private_key = dict(type='str', required=False),
             addresses = dict(type='list', required=False),
             listen_port = dict(type='int', required=False),
             endpoint = dict(type='str', required=False),
-            # not handled currently
             mtu = dict(type='int', required=False),
             preup = dict(type='str', required=False),
             predown = dict(type='str', required=False),
             postup = dict(type='str', required=False),
             postdown = dict(type='str', required=False),
-            table = dict(type='str', required=False),
-            saveconfig = dict(type='bool', required=False, default=False),
+            table = dict(type='int', required=False),
+            saveconfig = dict(type='bool', required=False),
 
             peers = dict(type='list', required=False, options=dict(
                 addresses = dict(type='list', required=False),
@@ -243,7 +265,6 @@ def run_module():
                 dns = dict(type='list', required=False),
                 allowedIPs = dict(type='list', required=False),
                 endpoint = dict(type='str', required=False),
-                # not handled currently
                 preshared_key = dict(type='str', required=False),
                 persistent_keepalive = dict(type='int', required=False),
                 )),
@@ -283,24 +304,25 @@ def run_module():
 
     config_dir = "/etc/wireguard/"
     server = module.params['server']
+    generatepeers =- module.params['generatepeers']
 
     # we want to make a server config and all of the peer configs
-    if module.params['generatepeers']:
-        # check for things needed for the peers first
-        if 'private_key' in server and server['private_key'] == None:
-            private_key, public_key = generate_keys()
-            server['private_key'] = private_key
-            server['public_key'] = public_key
+    # check for things needed for the peers first
+    if 'private_key' in server and server['private_key'] == None:
+        private_key, public_key = generate_keys()
+        server['private_key'] = private_key
+        server['public_key'] = public_key
 
-        if 'listen_port' in server and server['listen_port'] == None:
-            module.params['server']['listen_port'] = 5222
+    if 'listen_port' in server and server['listen_port'] == None:
+        module.params['server']['listen_port'] = 5222
 
-        if 'endpoint' in module.params['server'] and module.params['server']['endpoint'] == None:
-            module.fail_json(msg='endpoint is not specified')
+    if 'endpoint' in module.params['server'] and module.params['server']['endpoint'] == None:
+        module.fail_json(msg='endpoint is not specified')
 
-        peerConfigs = []
-        # the first address goes to the server
-        address_count = 2
+    peerConfigs = []
+    # the first address goes to the server
+    address_count = 2
+    if generatepeers:
         for peer in module.params['server']['peers']:
             conf = Config()
             conf.name = peer['peer']
@@ -325,7 +347,6 @@ def run_module():
                 else:
                     conf.interface.dns.append(peer['dns'][0])
 
-
             p = Peer()
             p.endpoint = module.params['server']['endpoint']
 
@@ -342,20 +363,29 @@ def run_module():
             else:
                 p.allowedIPs.append("0.0.0.0/0")
 
+            if 'preshared_key' in peer or peer['preshared_key'] == None:
+                p.preshared_key = peer['preshared_key']
+
+            if 'preshared_key' in peer or peer['preshared_key'] == None:
+                p.preshared_key = peer['preshared_key']
+
+            if 'persistent_keepalive' in peer or peer['persistent_keepalive'] == None:
+                p.persistent_keepalive = peer['persistent_keepalive']
+
             conf.peers.append(p)
             peerConfigs.append(conf)
 
             address_count += 1
 
-            with open(config_dir + conf.name, "w+") as fh:
+            f = config_dir + conf.name + ".conf"
+            with open(f, "w+") as fh:
                 fh.write(conf.ToWgQuick())
                 fh.close()
 
-            os.chmod(config_dir + conf.name, 0o600)
+            os.chmod(f, 0o600)
 
         # now make the server config now that we have all of the peers and theirkeys
         conf = Config()
-        #conf.name = config_dir + server['name']
         conf.name = server['name']
 
         if 'addresses' not in server or server['addresses'] == None:
@@ -366,6 +396,28 @@ def run_module():
             else:
                 conf.interface.addresses.append(server['addresses'][0])
 
+        if 'mtu' in server and server['mtu'] != None:
+            conf.interface.mtu = server['mtu']
+
+        if 'table' in server and server['table'] != None:
+            conf.interface.table = server['table']
+
+        if 'preup' in server and server['preup'] != None:
+            conf.interface.preup = server['preup']
+
+        if 'predown' in server and server['predown'] != None:
+            conf.interface.predown = server['predown']
+
+        if 'postup' in server and server['postup'] != None:
+            conf.interface.postup = server['postup']
+
+        if 'postdown' in server and server['postdown'] != None:
+            conf.interface.postdown = server['postdown']
+
+        if 'saveconfig' in server and server['saveconfig'] != None:
+            conf.interface.saveconfig = server['saveconfig']
+
+
         conf.interface.listen_port = server['listen_port']
         conf.interface.private_key = server['private_key']
 
@@ -375,11 +427,12 @@ def run_module():
             p.allowedIPs.append(DEFAULTADDRESS.format(0,24))
             conf.peers.append(p)
 
-        with open(config_dir + conf.name, "w+") as fh:
+        f = config_dir + conf.name + ".conf"
+        with open(f, "w+") as fh:
             fh.write(conf.ToWgQuick())
             fh.close()
 
-        os.chmod(config_dir + conf.name, 0o600)
+        os.chmod(f, 0o600)
 
     # use whatever logic you need to determine whether or not this module
     # made any modifications to your target
